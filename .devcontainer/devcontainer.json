@@ -1,0 +1,25 @@
+{
+  "name": "eth-erc20-levf-treasury-pool-v1",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "runArgs": [
+    "--env-file", //
+    "${localWorkspaceFolder}/.env"
+  ],
+  // "forwardPorts": [
+  //   8545
+  // ],
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash"
+  },
+  "extensions": [
+    "editorconfig.editorconfig", //
+    "juanblanco.solidity",
+    "hbenl.vscode-mocha-test-adapter",
+    "esbenp.prettier-vscode",
+    "streetsidesoftware.code-spell-checker"
+  ],
+  "initializeCommand": "touch .env",
+  "postCreateCommand": "npm install"
+}

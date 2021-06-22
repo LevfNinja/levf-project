@@ -1,0 +1,25 @@
+# Dotenv files
+.env
+.env.*
+!.env.example
+
+# Dependency directories
+node_modules/
+
+# Project temporary folder
+/tmp/
+
+# Hardhat files
+artifacts
+cache
+
+# Code coverage reports
+coverage.json
+coverage/
+
+# eth-gas-reporter reports
+eth-gas-reporter.report.txt
+
+# OpenZeppelin Upgradeable Contracts Network Files for development
+# https://docs.openzeppelin.com/upgrades-plugins/1.x/network-files
+/.openzeppelin/unknown-*.json

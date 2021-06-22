@@ -1,0 +1,30 @@
+// https://github.com/streetsidesoftware/vscode-spell-checker/blob/master/packages/client/README.md#cspelljson
+{
+  "version": "0.1",
+  "words": [
+    //
+    "BDai",
+    "BscScan",
+    "BToken",
+    "DSec",
+    "Dsecs",
+    "Hexa",
+    "LDai",
+    "LevF",
+    "LToken",
+    "NomicLabs",
+    "Penta",
+    "Solhint",
+    "Unminted",
+    "yvDAI"
+  ],
+  "ignorePaths": [
+    ".env",
+    "/.devcontainer/devcontainer.json",
+    "/.github/workflows/solidity.yml",
+    "/.vscode/cspell.json",
+    "/.vscode/settings.json",
+    "/package.json",
+    "/package-lock.json"
+  ]
+}
