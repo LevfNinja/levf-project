@@ -20,6 +20,11 @@ function bnAbsDiff(bn1, bn2) {
   return bn1.gt(bn2) ? bn1.sub(bn2) : bn2.sub(bn1);
 }
 
+function bnDiffInRange(bn1, bn2, maxDiff, minDiff = 0) {
+  const absDiff = bnAbsDiff(bn1, bn2);
+  return absDiff.lte(maxDiff) && absDiff.gte(minDiff);
+}
+
 async function estimateLfiBalanceAfterTransfer(lfi, sender, recipient, amount, account = undefined) {
   const excludedAccounts = await lfi.excludedAccounts();
   const totalSupply = await lfi.totalSupply();
@@ -161,12 +166,17 @@ async function newFarmingPool(
   insuranceFundAddress,
   leverageFactor,
   liquidityPenalty,
-  taxRate
+  taxRate,
+  borrowerInterestRateConfig
 ) {
   const accounts = await web3.eth.getAccounts();
   const defaults = {
     name: "Yearn DAI Vault",
     insuranceFundAccount: accounts[2],
+    integerInterestRatePoint1: 10,
+    integerInterestRatePoint2: 25,
+    integerUtilisationRatePoint1: 50,
+    integerUtilisationRatePoint2: 95,
     leverageFactor: 20,
     liquidityPenalty: 10,
     taxRate: 10,
@@ -199,6 +209,14 @@ async function newFarmingPool(
   const actualLeverageFactor = await getDefinedOrDefault(leverageFactor, () => defaults.leverageFactor);
   const actualLiquidityPenalty = await getDefinedOrDefault(liquidityPenalty, () => defaults.liquidityPenalty);
   const actualTaxRate = await getDefinedOrDefault(taxRate, () => defaults.taxRate);
+  const actualBorrowerInterestRateConfig = await getDefinedOrDefault(borrowerInterestRateConfig, () => {
+    return {
+      integerInterestRatePoint1: defaults.integerInterestRatePoint1,
+      integerInterestRatePoint2: defaults.integerInterestRatePoint2,
+      integerUtilisationRatePoint1: defaults.integerUtilisationRatePoint1,
+      integerUtilisationRatePoint2: defaults.integerUtilisationRatePoint2,
+    };
+  });
 
   return await FarmingPool.new(
     actualName,
@@ -208,7 +226,8 @@ async function newFarmingPool(
     actualInsuranceFundAddress,
     actualLeverageFactor,
     actualLiquidityPenalty,
-    actualTaxRate
+    actualTaxRate,
+    actualBorrowerInterestRateConfig
   );
 }
 
@@ -306,6 +325,7 @@ module.exports = {
   newYearnVaultV2Mock,
   newYvdaiAdapter,
   bnAbsDiff,
+  bnDiffInRange,
   getBlockTimestamp,
   estimateLfiBalanceAfterTransfer,
   ZERO_ADDRESS,

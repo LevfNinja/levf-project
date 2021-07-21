@@ -28,25 +28,34 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
         uint256 amountToReceive;
     }
 
+    struct BorrowerInterestRateModel {
+        uint256 interestRateIntegerPoint1; // as percentage in unsigned integer
+        uint256 interestRateIntegerPoint2; // as percentage in unsigned integer
+        uint256 utilisationRatePoint1; // as percentage in unsigned 64.64 fixed-point number
+        uint256 utilisationRatePoint2; // as percentage in unsigned 64.64 fixed-point number
+        uint256 interestRateSlope1; // in unsigned 64.64 fixed-point number
+        uint256 interestRateSlope2; // in unsigned 64.64 fixed-point number
+    }
+
+    struct FarmingPoolConfig {
+        uint256 leverageFactor;
+        uint256 liquidationPenalty; // as percentage in unsigned integer
+        uint256 taxRate; // as percentage in unsigned integer
+    }
+
+    struct BorrowerInterestRateConfig {
+        uint256 integerInterestRatePoint1;
+        uint256 integerInterestRatePoint2;
+        uint256 integerUtilisationRatePoint1;
+        uint256 integerUtilisationRatePoint2;
+    }
+
     uint256 public constant ROUNDING_TOLERANCE = 9999999999 wei;
     uint256 public constant NUM_FRACTION_BITS = 64;
     uint256 public constant SECONDS_IN_DAY = 86400;
     uint256 public constant DAYS_IN_YEAR = 365;
     uint256 public constant SECONDS_IN_YEAR = SECONDS_IN_DAY * DAYS_IN_YEAR;
-    // https://github.com/crytic/slither/wiki/Detector-Documentation#too-many-digits
-    // slither-disable-next-line too-many-digits
-    uint256 public constant INTEREST_RATE_SLOPE_1 = 0x5555555555555555; // 1/3 in unsigned 64.64 fixzed-point number
-    // https://github.com/crytic/slither/wiki/Detector-Documentation#variable-names-too-similar
-    // slither-disable-next-line similar-names,too-many-digits
-    uint256 public constant INTEREST_RATE_SLOPE_2 = 0xF0000000000000000; // 15 in unsigned 64.64 fixed-point number
-    uint256 public constant INTEREST_RATE_INTEGER_POINT_1 = 10;
-    // slither-disable-next-line similar-names
-    uint256 public constant INTEREST_RATE_INTEGER_POINT_2 = 25;
     uint256 public constant PERCENT_100 = 100;
-    // slither-disable-next-line too-many-digits
-    uint256 public constant UTILISATION_RATE_POINT_1 = 0x320000000000000000; // 50% in unsigned 64.64 fixed-point number
-    // slither-disable-next-line similar-names,too-many-digits
-    uint256 public constant UTILISATION_RATE_POINT_2 = 0x5F0000000000000000; // 95% in unsigned 64.64 fixed-point number
 
     string public name;
     address public governanceAccount;
@@ -55,12 +64,12 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
     address public treasuryPoolAddress;
     address public insuranceFundAddress;
     address public adapterAddress;
-    uint256 public leverageFactor;
-    uint256 public liquidationPenalty; // as percentage in unsigned integer
-    uint256 public taxRate; // as percentage in unsigned integer
 
     uint256 public totalUnderlyingAsset;
     uint256 public totalInterestEarned;
+
+    FarmingPoolConfig private _farmingPoolConfig;
+    BorrowerInterestRateModel private _borrowerInterestRateModel;
 
     mapping(address => uint256) private _totalTransferToAdapter;
     mapping(address => IterableLoanMap.RateToLoanMap) private _farmerLoans;
@@ -74,7 +83,8 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
         address insuranceFundAddress_,
         uint256 leverageFactor_,
         uint256 liquidationPenalty_,
-        uint256 taxRate_
+        uint256 taxRate_,
+        BorrowerInterestRateConfig memory browserInterestRateConfig_
     ) {
         require(
             underlyingAssetAddress_ != address(0),
@@ -96,9 +106,29 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
         btokenAddress = btokenAddress_;
         treasuryPoolAddress = treasuryPoolAddress_;
         insuranceFundAddress = insuranceFundAddress_;
-        leverageFactor = leverageFactor_;
-        liquidationPenalty = liquidationPenalty_;
-        taxRate = taxRate_;
+
+        _farmingPoolConfig.leverageFactor = leverageFactor_;
+        _farmingPoolConfig.liquidationPenalty = liquidationPenalty_;
+        _farmingPoolConfig.taxRate = taxRate_;
+
+        _borrowerInterestRateModel
+            .interestRateIntegerPoint1 = browserInterestRateConfig_
+            .integerInterestRatePoint1;
+        _borrowerInterestRateModel
+            .interestRateIntegerPoint2 = browserInterestRateConfig_
+            .integerInterestRatePoint2;
+
+        (
+            _borrowerInterestRateModel.utilisationRatePoint1,
+            _borrowerInterestRateModel.utilisationRatePoint2,
+            _borrowerInterestRateModel.interestRateSlope1,
+            _borrowerInterestRateModel.interestRateSlope2
+        ) = calculateBorrowerInterestRateModel(
+            browserInterestRateConfig_.integerInterestRatePoint1,
+            browserInterestRateConfig_.integerInterestRatePoint2,
+            browserInterestRateConfig_.integerUtilisationRatePoint1,
+            browserInterestRateConfig_.integerUtilisationRatePoint2
+        );
     }
 
     modifier onlyBy(address account) {
@@ -118,7 +148,7 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
             ITreasuryPool(treasuryPoolAddress).getUtilisationRate(); // in unsigned 64.64-bit fixed point number
         uint256 integerNominalAnnualRate =
             getBorrowNominalAnnualRate(utilisationRate);
-        uint256 transferAmount = amount.mul(leverageFactor);
+        uint256 transferAmount = amount.mul(_farmingPoolConfig.leverageFactor);
         _totalTransferToAdapter[msg.sender] = _totalTransferToAdapter[
             msg.sender
         ]
@@ -240,7 +270,9 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
         ) = removeLiquidityFor(account, farmerBtokenBalance);
 
         uint256 penalty =
-            actualAmountToReceive.mul(liquidationPenalty).div(PERCENT_100);
+            actualAmountToReceive
+                .mul(_farmingPoolConfig.liquidationPenalty)
+                .div(PERCENT_100);
         uint256 finalAmountToReceive = actualAmountToReceive.sub(penalty);
 
         emit LiquidateFarmer(
@@ -354,7 +386,7 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
     {
         require(liquidationPenalty_ <= 100, "liquidation penalty > 100%");
 
-        liquidationPenalty = liquidationPenalty_;
+        _farmingPoolConfig.liquidationPenalty = liquidationPenalty_;
     }
 
     function pause() external onlyBy(governanceAccount) {
@@ -363,6 +395,30 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
 
     function unpause() external onlyBy(governanceAccount) {
         _unpause();
+    }
+
+    function leverageFactor() external view returns (uint256 leverageFactor_) {
+        leverageFactor_ = _farmingPoolConfig.leverageFactor;
+    }
+
+    function liquidationPenalty()
+        external
+        view
+        returns (uint256 liquidationPenalty_)
+    {
+        liquidationPenalty_ = _farmingPoolConfig.liquidationPenalty;
+    }
+
+    function taxRate() external view returns (uint256 taxRate_) {
+        taxRate_ = _farmingPoolConfig.taxRate;
+    }
+
+    function borrowerInterestRateModel()
+        external
+        view
+        returns (BorrowerInterestRateModel memory borrowerInterestRateModel_)
+    {
+        borrowerInterestRateModel_ = _borrowerInterestRateModel;
     }
 
     function getTotalTransferToAdapterFor(address account)
@@ -511,29 +567,40 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
      */
     function getBorrowNominalAnnualRate(uint256 utilisationRate)
         public
-        pure
+        view
         returns (uint256 integerInterestRate)
     {
         // https://github.com/crytic/slither/wiki/Detector-Documentation#too-many-digits
         // slither-disable-next-line too-many-digits
         require(utilisationRate <= 0x640000000000000000, "> 100%");
 
-        if (utilisationRate <= UTILISATION_RATE_POINT_1) {
-            integerInterestRate = INTEREST_RATE_INTEGER_POINT_1;
-        } else if (utilisationRate < UTILISATION_RATE_POINT_2) {
+        if (
+            utilisationRate <= _borrowerInterestRateModel.utilisationRatePoint1
+        ) {
+            integerInterestRate = _borrowerInterestRateModel
+                .interestRateIntegerPoint1;
+        } else if (
+            utilisationRate < _borrowerInterestRateModel.utilisationRatePoint2
+        ) {
             uint256 pointSlope =
-                utilisationRate.sub(UTILISATION_RATE_POINT_1).mul(
-                    INTEREST_RATE_SLOPE_1
-                ) >> (NUM_FRACTION_BITS * 2);
+                utilisationRate
+                    .sub(_borrowerInterestRateModel.utilisationRatePoint1)
+                    .mul(_borrowerInterestRateModel.interestRateSlope1) >>
+                    (NUM_FRACTION_BITS * 2);
 
-            integerInterestRate = pointSlope.add(INTEREST_RATE_INTEGER_POINT_1);
+            integerInterestRate = pointSlope.add(
+                _borrowerInterestRateModel.interestRateIntegerPoint1
+            );
         } else {
             uint256 pointSlope =
-                utilisationRate.sub(UTILISATION_RATE_POINT_2).mul(
-                    INTEREST_RATE_SLOPE_2
-                ) >> (NUM_FRACTION_BITS * 2);
+                utilisationRate
+                    .sub(_borrowerInterestRateModel.utilisationRatePoint2)
+                    .mul(_borrowerInterestRateModel.interestRateSlope2) >>
+                    (NUM_FRACTION_BITS * 2);
 
-            integerInterestRate = pointSlope.add(INTEREST_RATE_INTEGER_POINT_2);
+            integerInterestRate = pointSlope.add(
+                _borrowerInterestRateModel.interestRateIntegerPoint2
+            );
         }
     }
 
@@ -593,6 +660,70 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
         accrualTimestamp = currentTimestamp;
     }
 
+    /**
+     * @dev Returns the borrower interest rate model parameters
+     *
+     * @param integerInterestRatePoint1 point 1 integer interest rate as percentage in unsigned integer
+     * @param integerInterestRatePoint2 point 2 integer interest rate as percentage in unsigned integer
+     * @param integerUtilisationRatePoint1 point 1 integer utilisation rate as percentage in unsigned integer
+     * @param integerUtilisationRatePoint2 point 2 integer utilisation rate as percentage in unsigned integer
+     * @return utilisationRatePoint1_ point 1 utilisation rate in unsigned 64.64 fixed-point number
+     * @return utilisationRatePoint2_ point 2 utilisation rate in unsigned 64.64 fixed-point number
+     * @return interestRateSlope1_ interest rate slope 1 in unsigned 64.64 fixed-point number
+     * @return interestRateSlope2_ interest rate slope 2 in unsigned 64.64 fixed-point number
+     */
+    function calculateBorrowerInterestRateModel(
+        uint256 integerInterestRatePoint1,
+        uint256 integerInterestRatePoint2,
+        uint256 integerUtilisationRatePoint1,
+        uint256 integerUtilisationRatePoint2
+    )
+        public
+        pure
+        returns (
+            uint256 utilisationRatePoint1_,
+            uint256 utilisationRatePoint2_,
+            uint256 interestRateSlope1_,
+            uint256 interestRateSlope2_
+        )
+    {
+        require(integerInterestRatePoint1 > 0, "0 point 1 interest rate");
+        require(
+            integerInterestRatePoint1 < 100,
+            "point 1 interest rate equal or exceed 100%"
+        );
+        require(integerInterestRatePoint2 > 0, "0 point 2 interest rate");
+        require(
+            integerInterestRatePoint2 < 100,
+            "point 2 interest rate equal or exceed 100%"
+        );
+        require(integerUtilisationRatePoint1 > 0, "0 point 1 utilisation rate");
+        require(
+            integerUtilisationRatePoint1 < 100,
+            "point 1 utilisation rate equal or exceed 100%"
+        );
+        require(integerUtilisationRatePoint2 > 0, "0 point 2 utilisation rate");
+        require(
+            integerUtilisationRatePoint2 < 100,
+            "point 2 utilisation rate equal or exceed 100%"
+        );
+
+        utilisationRatePoint1_ =
+            integerUtilisationRatePoint1 <<
+            NUM_FRACTION_BITS;
+        utilisationRatePoint2_ =
+            integerUtilisationRatePoint2 <<
+            NUM_FRACTION_BITS;
+
+        interestRateSlope1_ = (integerInterestRatePoint2.sub(
+            integerInterestRatePoint1
+        ) << (2 * NUM_FRACTION_BITS))
+            .div(utilisationRatePoint2_.sub(utilisationRatePoint1_));
+        interestRateSlope2_ = (PERCENT_100.sub(integerInterestRatePoint2) <<
+            (2 * NUM_FRACTION_BITS))
+            .div((PERCENT_100 << 64).sub(utilisationRatePoint2_));
+    }
+
     function accrueInterestForLoan(
         IterableLoanMap.RateToLoanMap storage rateToLoanMap
     )
@@ -647,7 +778,7 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
 
         uint256 index = 0;
         for (
-            uint256 rate = INTEREST_RATE_INTEGER_POINT_1;
+            uint256 rate = _borrowerInterestRateModel.interestRateIntegerPoint1;
             rate <= PERCENT_100;
             rate++
         ) {
@@ -724,11 +855,12 @@ contract FarmingPool is Pausable, ReentrancyGuard, IFarmingPool {
             );
             repaymentDetails.taxAmount = repaymentDetails
                 .profit
-                .mul(taxRate)
+                .mul(_farmingPoolConfig.taxRate)
                 .div(PERCENT_100);
         }
 
-        uint256 depositPrincipal = underlyingAssetInvested.div(leverageFactor);
+        uint256 depositPrincipal =
+            underlyingAssetInvested.div(_farmingPoolConfig.leverageFactor);
         repaymentDetails.depositPrincipal = depositPrincipal;
         // slither-disable-next-line divide-before-multiply
         repaymentDetails.payableInterest = outstandingInterest

@@ -66,6 +66,7 @@ async function deploy(treasuryPoolAddress) {
   let leverageFactor;
   let liquidityPenalty;
   let taxRate;
+  let borrowerInterestRateConfig;
 
   let isLiveNetwork = true;
   if (network === "mainnet") {
@@ -75,6 +76,12 @@ async function deploy(treasuryPoolAddress) {
     leverageFactor = 20;
     liquidityPenalty = 10;
     taxRate = 10;
+    borrowerInterestRateConfig = {
+      integerInterestRatePoint1: 10,
+      integerInterestRatePoint2: 25,
+      integerUtilisationRatePoint1: 50,
+      integerUtilisationRatePoint2: 95,
+    };
   } else if (network === "ropsten") {
     underlyingAssetAddress = ropstenUnderlyingAssetAddress;
     yvdaiAddress = ropstenYvdaiAddress;
@@ -82,6 +89,12 @@ async function deploy(treasuryPoolAddress) {
     leverageFactor = 20;
     liquidityPenalty = 10;
     taxRate = 10;
+    borrowerInterestRateConfig = {
+      integerInterestRatePoint1: 10,
+      integerInterestRatePoint2: 25,
+      integerUtilisationRatePoint1: 50,
+      integerUtilisationRatePoint2: 95,
+    };
   } else if (network === "kovan") {
     underlyingAssetAddress = kovanUnderlyingAssetAddress;
     yvdaiAddress = kovanYvdaiAddress;
@@ -89,6 +102,12 @@ async function deploy(treasuryPoolAddress) {
     leverageFactor = 20;
     liquidityPenalty = 10;
     taxRate = 10;
+    borrowerInterestRateConfig = {
+      integerInterestRatePoint1: 10,
+      integerInterestRatePoint2: 25,
+      integerUtilisationRatePoint1: 50,
+      integerUtilisationRatePoint2: 95,
+    };
   } else if (network === "bsc-testnet") {
     underlyingAssetAddress = bscTestnetUnderlyingAssetAddress;
     yvdaiAddress = bscTestnetYvdaiAddress;
@@ -96,6 +115,12 @@ async function deploy(treasuryPoolAddress) {
     leverageFactor = 20;
     liquidityPenalty = 10;
     taxRate = 10;
+    borrowerInterestRateConfig = {
+      integerInterestRatePoint1: 10,
+      integerInterestRatePoint2: 25,
+      integerUtilisationRatePoint1: 50,
+      integerUtilisationRatePoint2: 95,
+    };
   } else if (network === "localhost" || network === "yearn-mainnet-fork") {
     isLiveNetwork = false;
     if (network === "yearn-mainnet-fork") {
@@ -120,6 +145,12 @@ async function deploy(treasuryPoolAddress) {
     leverageFactor = 20;
     liquidityPenalty = 10;
     taxRate = 10;
+    borrowerInterestRateConfig = {
+      integerInterestRatePoint1: 10,
+      integerInterestRatePoint2: 25,
+      integerUtilisationRatePoint1: 50,
+      integerUtilisationRatePoint2: 95,
+    };
   } else {
     throw new Error(`Unknown network: ${network}`);
   }
@@ -136,6 +167,8 @@ async function deploy(treasuryPoolAddress) {
     throw new Error("Unknown liquidity penalty");
   } else if (taxRate === undefined) {
     throw new Error("Unknown taxRate");
+  } else if (borrowerInterestRateConfig === undefined) {
+    throw new Error("Unknown borrowerInterestRateConfig");
   }
 
   farmingPoolArguments = [
@@ -147,6 +180,7 @@ async function deploy(treasuryPoolAddress) {
     leverageFactor,
     liquidityPenalty,
     taxRate,
+    borrowerInterestRateConfig,
   ];
   farmingPool = await deployUtil.deployContract(FarmingPool, farmingPoolArguments, true);
 

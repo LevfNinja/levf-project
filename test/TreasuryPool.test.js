@@ -1,7 +1,7 @@
 const assert = require("assert");
 const timeMachine = require("ganache-time-traveler");
 const { expectEvent, expectRevert, time } = require("@openzeppelin/test-helpers");
-const { BN, BN_ONE, ether, wei, ZERO_ADDRESS, ...testUtil } = require("./testUtil");
+const { BN, BN_ZERO, BN_ONE, ether, wei, ZERO_ADDRESS, ...testUtil } = require("./testUtil");
 
 const NewTreasuryPoolMock = artifacts.require("NewTreasuryPoolMock");
 
@@ -599,7 +599,7 @@ describe("TreasuryPool", () => {
     const liquidityProvider = accounts[5];
 
     await expectRevert(
-      treasuryPool.redeemProviderReward(new BN(1), new BN(0), { from: liquidityProvider }),
+      treasuryPool.redeemProviderReward(BN_ONE, BN_ZERO, { from: liquidityProvider }),
       "TreasuryPool: invalid epoch range"
     );
   });
@@ -610,7 +610,7 @@ describe("TreasuryPool", () => {
     await treasuryPool.pause({ from: defaultGovernanceAccount });
 
     await expectRevert(
-      treasuryPool.redeemProviderReward(new BN(0), new BN(0), { from: liquidityProvider }),
+      treasuryPool.redeemProviderReward(BN_ZERO, BN_ZERO, { from: liquidityProvider }),
       "TreasuryPool: redeem while paused"
     );
   });
@@ -639,8 +639,8 @@ describe("TreasuryPool", () => {
 
     await time.increaseTo(descDistEndTimestamp);
 
-    const fromEpoch = new BN(0);
-    const toEpoch = new BN(1);
+    const fromEpoch = BN_ZERO;
+    const toEpoch = BN_ONE;
     const firstReceiptOfLP1 = await treasuryPool.redeemProviderReward(fromEpoch, toEpoch, { from: liquidityProvider1 });
     const secondReceiptOfLP1 = await treasuryPool.redeemProviderReward(fromEpoch, toEpoch, {
       from: liquidityProvider1,
@@ -702,14 +702,14 @@ describe("TreasuryPool", () => {
       ltokenBalanceOfLP2.eq(expectLtokenBalanceOfLP2),
       `LToken balance of LP2 is ${ltokenBalanceOfLP2} instead of ${expectLtokenBalanceOfLP2}`
     );
-    assert.ok(lfiBalanceOfLP2.gt(0), `LFI balance of LP2 should be greater than 0`);
+    assert.ok(lfiBalanceOfLP2.gt(BN_ZERO), `LFI balance of LP2 should be greater than 0`);
     const dsecRedeemEvent0 = await expectEvent.inTransaction(firstReceiptOfLP2.tx, dsecDistribution, "DsecRedeem", {
       account: liquidityProvider2,
-      epoch: new BN(0),
+      epoch: BN_ZERO,
     });
     const dsecRedeemEvent1 = await expectEvent.inTransaction(firstReceiptOfLP2.tx, dsecDistribution, "DsecRedeem", {
       account: liquidityProvider2,
-      epoch: new BN(1),
+      epoch: BN_ONE,
     });
     expectEvent(firstReceiptOfLP2, "RedeemProviderReward", {
       account: liquidityProvider2,
@@ -727,14 +727,14 @@ describe("TreasuryPool", () => {
     const nonTeamAccount = accounts[5];
 
     await expectRevert(
-      treasuryPool.redeemTeamReward(new BN(0), new BN(0), { from: nonTeamAccount }),
+      treasuryPool.redeemTeamReward(BN_ZERO, BN_ZERO, { from: nonTeamAccount }),
       "TreasuryPool: sender not authorized"
     );
   });
 
   it("should not allow team to redeem rewards when providing invalid epoch range", async () => {
     await expectRevert(
-      treasuryPool.redeemTeamReward(new BN(1), new BN(0), { from: defaultTeamAccount }),
+      treasuryPool.redeemTeamReward(BN_ONE, BN_ZERO, { from: defaultTeamAccount }),
       "TreasuryPool: invalid epoch range"
     );
   });
@@ -743,7 +743,7 @@ describe("TreasuryPool", () => {
     await treasuryPool.pause({ from: defaultGovernanceAccount });
 
     await expectRevert(
-      treasuryPool.redeemTeamReward(new BN(0), new BN(0), { from: defaultTeamAccount }),
+      treasuryPool.redeemTeamReward(BN_ZERO, BN_ZERO, { from: defaultTeamAccount }),
       "TreasuryPool: redeem while paused"
     );
   });
@@ -758,13 +758,13 @@ describe("TreasuryPool", () => {
     await time.increaseTo(descDistEndTimestamp);
 
     const beforeLfiBalance = await lfi.balanceOf(defaultTeamAccount);
-    const fromEpoch = new BN(0);
-    const toEpoch = new BN(1);
+    const fromEpoch = BN_ZERO;
+    const toEpoch = BN_ONE;
     const expectLfiBalanceAfterRedeemed = await testUtil.estimateLfiBalanceAfterTransfer(
       lfi,
       lfi.address,
       defaultTeamAccount,
-      teamRewardPerEpoch.mul(toEpoch.sub(fromEpoch).add(new BN(1))),
+      teamRewardPerEpoch.mul(toEpoch.sub(fromEpoch).add(BN_ONE)),
       "recipient"
     );
     const firstReceipt = await treasuryPool.redeemTeamReward(fromEpoch, toEpoch, { from: defaultTeamAccount });
@@ -783,7 +783,7 @@ describe("TreasuryPool", () => {
     const expectUnderlyingAssetBalance = ether("0");
     const expectLtokenBalance = ether("0");
     const expectReceivedLfiRedemptionAmount = expectLfiBalanceAfterRedeemed.sub(beforeLfiBalance);
-    const expectRedeemedLfiAmount = teamRewardPerEpoch.mul(toEpoch.sub(fromEpoch).add(new BN(1)));
+    const expectRedeemedLfiAmount = teamRewardPerEpoch.mul(toEpoch.sub(fromEpoch).add(BN_ONE));
 
     assert.ok(
       totalUnderlyingAssetAmount.eq(expectTotalUnderlyingAssetAmount),
@@ -802,16 +802,16 @@ describe("TreasuryPool", () => {
       `LToken balance is ${ltokenBalance} instead of ${expectLtokenBalance}`
     );
     assert.ok(
-      testUtil.bnAbsDiff(receivedLfiRedemptionAmount, expectReceivedLfiRedemptionAmount).lte(BN_ONE),
-      `Received LFI redemption amount is ${receivedLfiRedemptionAmount} instead of ${expectReceivedLfiRedemptionAmount}`
+      testUtil.bnDiffInRange(receivedLfiRedemptionAmount, expectReceivedLfiRedemptionAmount, BN_ONE),
+      `Received LFI redemption amount ${receivedLfiRedemptionAmount} is not close to ${expectReceivedLfiRedemptionAmount}`
     );
     await expectEvent.inTransaction(firstReceipt.tx, dsecDistribution, "TeamRewardRedeem", {
       sender: treasuryPool.address,
-      epoch: new BN(0),
+      epoch: BN_ZERO,
     });
     await expectEvent.inTransaction(firstReceipt.tx, dsecDistribution, "TeamRewardRedeem", {
       sender: treasuryPool.address,
-      epoch: new BN(1),
+      epoch: BN_ONE,
     });
     expectEvent(firstReceipt, "RedeemTeamReward", {
       account: defaultTeamAccount,

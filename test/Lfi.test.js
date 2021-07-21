@@ -41,6 +41,8 @@ describe("Lfi", () => {
     const expectInitialTotalSupply = expectCap;
     const expectGovernanceAccount = defaultGovernanceAccount;
 
+    await expectRevert(testUtil.newLfi(undefined, undefined, 0, undefined, undefined, ZERO_ADDRESS), "tTotal is 0");
+    await expectRevert(testUtil.newLfi(undefined, undefined, undefined, 101, undefined, ZERO_ADDRESS), "fee >= 100%");
     await expectRevert(
       testUtil.newLfi(undefined, undefined, undefined, undefined, undefined, ZERO_ADDRESS),
       "LFI: team account is the zero address"
@@ -175,6 +177,50 @@ describe("Lfi", () => {
     assert.deepStrictEqual(await lfi.treasuryPoolAddresses(), []);
   });
 
+  it("should only allow owner to excluded accounts", async () => {
+    const nonOwner = accounts[5];
+    const pendingExcludingAccount = accounts[6];
+    const excludedAccount = accounts[7];
+
+    await lfi.excludeAccount(excludedAccount, { from: defaultGovernanceAccount });
+
+    await expectRevert(
+      lfi.excludeAccount(excludedAccount, { from: defaultGovernanceAccount }),
+      "Account is already excluded"
+    );
+    await expectRevert.unspecified(lfi.excludeAccount(pendingExcludingAccount, { from: nonOwner }));
+    await assert.doesNotReject(
+      async () => await lfi.excludeAccount(pendingExcludingAccount, { from: defaultGovernanceAccount })
+    );
+    assert.strictEqual(
+      (await lfi.excludedAccounts()).includes(pendingExcludingAccount),
+      true,
+      "account is not excluded"
+    );
+  });
+
+  it("should only allow owner to included accounts", async () => {
+    const nonOwner = accounts[5];
+    const pendingExcludingAccount = accounts[6];
+    const includedAccount = accounts[7];
+
+    await lfi.excludeAccount(pendingExcludingAccount, { from: defaultGovernanceAccount });
+
+    await expectRevert(
+      lfi.includeAccount(includedAccount, { from: defaultGovernanceAccount }),
+      "Account is already excluded"
+    );
+    await expectRevert.unspecified(lfi.includeAccount(pendingExcludingAccount, { from: nonOwner }));
+    await assert.doesNotReject(
+      async () => await lfi.includeAccount(pendingExcludingAccount, { from: defaultGovernanceAccount })
+    );
+    assert.strictEqual(
+      (await lfi.excludedAccounts()).includes(pendingExcludingAccount),
+      false,
+      "account is not included"
+    );
+  });
+
   it("should not allow to redeem to zero address", async () => {
     const treasuryPoolAddress = accounts[5];
 
@@ -223,8 +269,112 @@ describe("Lfi", () => {
       "LFI: sender not a treasury pool"
     );
     assert.ok(
-      testUtil.bnAbsDiff(actualRedeemedAmount, expectedRedeemedAmount).lte(BN_ONE),
-      `Actual redeemed amount is ${actualRedeemedAmount} instead of ${expectedRedeemedAmount}`
+      testUtil.bnDiffInRange(actualRedeemedAmount, expectedRedeemedAmount, BN_ONE),
+      `Actual redeemed amount ${actualRedeemedAmount} is not close to ${expectedRedeemedAmount}`
+    );
+  });
+
+  it("can be fully redeemed", async () => {
+    const treasuryPoolAddress = accounts[5];
+
+    const totalSupply = await lfi.totalSupply();
+    let redeemedAmount = await lfi.teamPreMinted();
+    await lfi.addTreasuryPoolAddress(treasuryPoolAddress, { from: defaultGovernanceAccount });
+
+    let normalTries = 100;
+    let redeemAmount = totalSupply.sub(redeemedAmount).sub(wei("100")).div(new BN(normalTries));
+    for (let i = 0; i < normalTries; i++) {
+      redeemedAmount = redeemedAmount.add(redeemAmount);
+      await lfi.redeem(treasuryPoolAddress, redeemAmount, { from: treasuryPoolAddress });
+    }
+
+    // min value: 1 wei
+    redeemAmount = wei("1");
+    while (redeemedAmount.lt(totalSupply)) {
+      redeemedAmount = redeemedAmount.add(redeemAmount);
+      await lfi.redeem(treasuryPoolAddress, redeemAmount, { from: treasuryPoolAddress });
+    }
+
+    assert.ok(redeemedAmount.eq(totalSupply), `Redeemed amount is ${redeemedAmount} instead of ${totalSupply}`);
+  });
+
+  it("should not allow to approve for the zero address", async () => {
+    await expectRevert(
+      lfi.approve(ZERO_ADDRESS, ether("1"), { from: defaultTeamAccount }),
+      "ERC20: approve to the zero address"
+    );
+  });
+
+  it("should not allow to transfer to zero address", async () => {
+    await expectRevert(
+      lfi.transfer(ZERO_ADDRESS, ether("1"), { from: defaultTeamAccount }),
+      "ERC20: transfer to the zero address"
+    );
+  });
+
+  it("should not allow to transfer 0", async () => {
+    const recipient = accounts[5];
+
+    await expectRevert(
+      lfi.transfer(recipient, ether("0"), { from: defaultTeamAccount }),
+      "Transfer amount must be greater than zero"
+    );
+  });
+
+  it("should only allow transfers not exceeding the allowance", async () => {
+    const spender1 = accounts[5];
+    const spender2 = accounts[6];
+    const spender3 = accounts[7];
+
+    await lfi.approve(spender1, ether("1"), { from: defaultTeamAccount });
+    await lfi.approve(spender2, ether("1"), { from: defaultTeamAccount });
+    await lfi.approve(spender3, ether("1"), { from: defaultTeamAccount });
+    await lfi.increaseAllowance(spender2, ether("2"), { from: defaultTeamAccount });
+    await lfi.increaseAllowance(spender3, ether("2"), { from: defaultTeamAccount });
+    await lfi.decreaseAllowance(spender2, ether("1"), { from: defaultTeamAccount });
+
+    const allowanceOfSpender1 = await lfi.allowance(defaultTeamAccount, spender1);
+    const allowanceOfSpender2 = await lfi.allowance(defaultTeamAccount, spender2);
+    const allowanceOfSpender3 = await lfi.allowance(defaultTeamAccount, spender3);
+
+    const expectAllowanceOfSpender1 = ether("1");
+    const expectAllowanceOfSpender2 = ether("2");
+    const expectAllowanceOfSpender3 = ether("3");
+
+    assert.ok(
+      allowanceOfSpender1.eq(expectAllowanceOfSpender1),
+      `Allow of spender1 is ${allowanceOfSpender1} instead of ${expectAllowanceOfSpender1}`
+    );
+    assert.ok(
+      allowanceOfSpender2.eq(expectAllowanceOfSpender2),
+      `Allow of spender2 is ${allowanceOfSpender2} instead of ${expectAllowanceOfSpender2}`
+    );
+    assert.ok(
+      allowanceOfSpender3.eq(expectAllowanceOfSpender3),
+      `Allow of spender3 is ${allowanceOfSpender3} instead of ${expectAllowanceOfSpender3}`
+    );
+
+    await expectRevert(
+      lfi.transferFrom(defaultTeamAccount, defaultGovernanceAccount, ether("1").add(wei("1")), { from: spender1 }),
+      "ERC20: transfer amount exceeds allowance"
+    );
+    await expectRevert(
+      lfi.transferFrom(defaultTeamAccount, defaultGovernanceAccount, ether("2").add(wei("1")), { from: spender2 }),
+      "ERC20: transfer amount exceeds allowance"
+    );
+    await expectRevert(
+      lfi.transferFrom(defaultTeamAccount, defaultGovernanceAccount, ether("3").add(wei("1")), { from: spender3 }),
+      "ERC20: transfer amount exceeds allowance"
+    );
+
+    await assert.doesNotReject(async () =>
+      lfi.transferFrom(defaultTeamAccount, defaultGovernanceAccount, ether("1"), { from: spender1 })
+    );
+    await assert.doesNotReject(async () =>
+      lfi.transferFrom(defaultTeamAccount, defaultGovernanceAccount, ether("2"), { from: spender2 })
+    );
+    await assert.doesNotReject(async () =>
+      lfi.transferFrom(defaultTeamAccount, defaultGovernanceAccount, ether("3"), { from: spender3 })
     );
   });
 
@@ -635,27 +785,226 @@ describe("Lfi", () => {
     }
   });
 
-  it("can be fully redeemed", async () => {
-    const treasuryPoolAddress = accounts[5];
+  it("should transfer correctly between different accounts", async () => {
+    const normalAccount1 = defaultTeamAccount;
+    const normalAccount2 = accounts[5];
+    const excludedAccount1 = accounts[6];
+    const excludedAccount2 = accounts[7];
+    const dynamicAccount1 = accounts[8];
+    const dynamicAccount2 = accounts[9];
 
+    await lfi.excludeAccount(excludedAccount1);
+    await lfi.excludeAccount(excludedAccount2);
+    await lfi.excludeAccount(dynamicAccount1);
+
+    let transferUnits = [
+      // Normal -> Normal
+      {
+        sender: normalAccount1,
+        recipient: normalAccount2,
+        amount: ether("619"),
+      },
+      {
+        sender: normalAccount2,
+        recipient: normalAccount1,
+        amount: wei("997"),
+      },
+      // Normal -> Excluded
+      {
+        sender: normalAccount1,
+        recipient: excludedAccount1,
+        amount: ether("617"),
+      },
+      {
+        sender: normalAccount1,
+        recipient: excludedAccount2,
+        amount: wei("991"),
+      },
+      // Normal -> Dynamic (normal <-> excluded)
+      {
+        sender: normalAccount1,
+        recipient: dynamicAccount2,
+        amount: ether("613"),
+      },
+      {
+        sender: normalAccount1,
+        recipient: dynamicAccount2,
+        amount: wei("983"),
+      },
+      // Normal -> Dynamic (excluded <-> normal)
+      {
+        sender: normalAccount1,
+        recipient: dynamicAccount1,
+        amount: ether("607"),
+      },
+      {
+        sender: normalAccount1,
+        recipient: dynamicAccount1,
+        amount: wei("607"),
+      },
+      // Excluded -> Normal
+      {
+        sender: excludedAccount1,
+        recipient: normalAccount1,
+        amount: ether("97"),
+      },
+      {
+        sender: excludedAccount1,
+        recipient: normalAccount1,
+        amount: wei("977"),
+      },
+      // Excluded -> Excluded
+      {
+        sender: excludedAccount1,
+        recipient: excludedAccount2,
+        amount: ether("89"),
+      },
+      {
+        sender: excludedAccount2,
+        recipient: excludedAccount1,
+        amount: wei("971"),
+      },
+      // Excluded -> Dynamic (normal <-> excluded)
+      {
+        sender: excludedAccount1,
+        recipient: dynamicAccount2,
+        amount: ether("83"),
+      },
+      {
+        sender: excludedAccount1,
+        recipient: dynamicAccount2,
+        amount: wei("967"),
+      },
+      // Excluded -> Dynamic (excluded <-> normal)
+      {
+        sender: excludedAccount1,
+        recipient: dynamicAccount1,
+        amount: ether("79"),
+      },
+      {
+        sender: excludedAccount1,
+        recipient: dynamicAccount1,
+        amount: wei("953"),
+      },
+      // Dynamic (normal <-> excluded) -> Normal
+      {
+        sender: dynamicAccount1,
+        recipient: normalAccount1,
+        amount: ether("73"),
+      },
+      {
+        sender: dynamicAccount1,
+        recipient: normalAccount2,
+        amount: wei("947"),
+      },
+      // Dynamic (normal <-> excluded) -> Excluded
+      {
+        sender: dynamicAccount1,
+        recipient: excludedAccount1,
+        amount: ether("71"),
+      },
+      {
+        sender: dynamicAccount1,
+        recipient: excludedAccount2,
+        amount: wei("941"),
+      },
+      // Dynamic (normal <-> excluded) -> Dynamic (excluded <-> normal)
+      {
+        sender: dynamicAccount1,
+        recipient: dynamicAccount2,
+        amount: ether("67"),
+      },
+      {
+        sender: dynamicAccount1,
+        recipient: dynamicAccount2,
+        amount: wei("937"),
+      },
+      // Dynamic (excluded <-> normal) -> Normal
+      {
+        sender: dynamicAccount2,
+        recipient: normalAccount1,
+        amount: ether("61"),
+      },
+      {
+        sender: dynamicAccount2,
+        recipient: normalAccount2,
+        amount: wei("929"),
+      },
+      // Dynamic (excluded <-> normal) -> Excluded
+      {
+        sender: dynamicAccount2,
+        recipient: excludedAccount1,
+        amount: ether("59"),
+      },
+      {
+        sender: dynamicAccount2,
+        recipient: excludedAccount2,
+        amount: wei("919"),
+      },
+      // Dynamic (excluded <-> normal) -> Dynamic (normal <-> excluded)
+      {
+        sender: dynamicAccount2,
+        recipient: dynamicAccount1,
+        amount: ether("53"),
+      },
+      {
+        sender: dynamicAccount2,
+        recipient: dynamicAccount1,
+        amount: wei("911"),
+      },
+    ];
+
+    let toggledTimes = 0; // 0: original state, 1: another state, 2: original state, 3: another state
+    do {
+      for (let i = 0; i < transferUnits.length; i++) {
+        let transferInfo = transferUnits[i];
+        const expectedBalanceAfterTransfer = await testUtil.estimateLfiBalanceAfterTransfer(
+          lfi,
+          transferInfo.sender,
+          transferInfo.recipient,
+          transferInfo.amount
+        );
+        await lfi.transfer(transferInfo.recipient, transferInfo.amount, { from: transferInfo.sender });
+        const actualBalanceOfSenderAfterTransfer = await lfi.balanceOf(transferInfo.sender);
+        const actualBalanceOfRecipientAfterTransfer = await lfi.balanceOf(transferInfo.recipient);
+
+        assert.ok(
+          testUtil.bnDiffInRange(actualBalanceOfSenderAfterTransfer, expectedBalanceAfterTransfer.sender, BN_ONE),
+          `Sender's balance ${actualBalanceOfSenderAfterTransfer} is not close to ${actualBalanceOfSenderAfterTransfer.sender}`
+        );
+        assert.ok(
+          testUtil.bnDiffInRange(actualBalanceOfRecipientAfterTransfer, expectedBalanceAfterTransfer.recipient, BN_ONE),
+          `Recipient's balance ${actualBalanceOfSenderAfterTransfer} is not close to ${actualBalanceOfSenderAfterTransfer.recipient}`
+        );
+      }
+
+      /* Toggle dynamic accounts */
+      const dynamicAccounts = [dynamicAccount1, dynamicAccount2];
+      for (let j = 0; j < dynamicAccounts.length; j++) {
+        const dynamicAccount = dynamicAccounts[j];
+        if (await lfi.isExcluded(dynamicAccount)) {
+          await lfi.includeAccount(dynamicAccount);
+        } else {
+          await lfi.excludeAccount(dynamicAccount);
+        }
+      }
+      toggledTimes++;
+    } while (toggledTimes <= 3);
+  });
+
+  it("should not allow the amount bigger than total supply for reflectionFromToken", async () => {
     const totalSupply = await lfi.totalSupply();
-    let redeemedAmount = await lfi.teamPreMinted();
-    await lfi.addTreasuryPoolAddress(treasuryPoolAddress, { from: defaultGovernanceAccount });
 
-    let normalTries = 100;
-    let redeemAmount = totalSupply.sub(redeemedAmount).sub(wei("100")).div(new BN(normalTries));
-    for (let i = 0; i < normalTries; i++) {
-      redeemedAmount = redeemedAmount.add(redeemAmount);
-      await lfi.redeem(treasuryPoolAddress, redeemAmount, { from: treasuryPoolAddress });
-    }
+    await expectRevert(lfi.reflectionFromToken(totalSupply.add(BN_ONE), true), "Amount must be less than supply");
+    await expectRevert(lfi.reflectionFromToken(totalSupply.add(BN_ONE), false), "Amount must be less than supply");
+  });
 
-    // min value: 1 wei
-    redeemAmount = wei("1");
-    while (redeemedAmount.lt(totalSupply)) {
-      redeemedAmount = redeemedAmount.add(redeemAmount);
-      await lfi.redeem(treasuryPoolAddress, redeemAmount, { from: treasuryPoolAddress });
-    }
+  it("should be interchangeable for reflectionFromToken and tokenFromReflection", async () => {
+    const originalAmount = ether("1");
 
-    assert.ok(redeemedAmount.eq(totalSupply), `Redeemed amount is ${redeemedAmount} instead of ${totalSupply}`);
+    const reflection = await lfi.reflectionFromToken(originalAmount, false);
+    const actualAmount = await lfi.tokenFromReflection(reflection);
+
+    assert.ok(testUtil.bnDiffInRange(actualAmount, originalAmount, BN_ONE));
   });
 });

@@ -255,6 +255,7 @@ describe("FarmingPool", () => {
     const leverageFactor = await farmingPool.leverageFactor();
     const liquidationPenalty = await farmingPool.liquidationPenalty();
     const taxRate = await farmingPool.taxRate();
+    const borrowerInterestRateModel = await farmingPool.borrowerInterestRateModel();
 
     const expectName = "Yearn DAI Vault";
     const expectGovernanceAccount = defaultGovernanceAccount;
@@ -265,6 +266,14 @@ describe("FarmingPool", () => {
     const expectLeverageFactor = new BN("20");
     const expectLiquidationPenalty = new BN("10");
     const expectTaxRate = new BN("10");
+    const expectBorrowerInterestRateModel = {
+      interestRateIntegerPoint1: "10", // as percentage in unsigned integer
+      interestRateIntegerPoint2: "25", // as percentage in unsigned integer
+      utilisationRatePoint1: new BN("320000000000000000", 16), // 50% in unsigned 64.64 fixed-point number
+      utilisationRatePoint2: new BN("5F0000000000000000", 16), // 95% in unsigned 64.64 fixed-point number
+      interestRateSlope1: new BN("5555555555555555", 16), // 1/3 in unsigned 64.64 fixed-point number
+      interestRateSlope2: new BN("F0000000000000000", 16), // 15 in unsigned 64.64 fixed-point number
+    };
 
     assert.strictEqual(name, expectName, `Name is ${name} instead of ${expectName}`);
     assert.strictEqual(
@@ -301,6 +310,32 @@ describe("FarmingPool", () => {
       `Liquidation penalty is ${liquidationPenalty} instead of ${expectLiquidationPenalty}`
     );
     assert.ok(taxRate.eq(expectTaxRate), `Tax rate is ${taxRate} instead of ${expectTaxRate}`);
+    assert.strictEqual(
+      borrowerInterestRateModel[0],
+      expectBorrowerInterestRateModel.interestRateIntegerPoint1,
+      `Interest rate integer point 1 is ${borrowerInterestRateModel[0]} instead of ${expectBorrowerInterestRateModel.interestRateIntegerPoint1}`
+    );
+    assert.strictEqual(
+      borrowerInterestRateModel[1],
+      expectBorrowerInterestRateModel.interestRateIntegerPoint2,
+      `Interest rate integer point 2 is ${borrowerInterestRateModel[1]} instead of ${expectBorrowerInterestRateModel.interestRateIntegerPoint2}`
+    );
+    assert.ok(
+      new BN(borrowerInterestRateModel[2]).eq(expectBorrowerInterestRateModel.utilisationRatePoint1),
+      `Utilisation rate point 1 is ${borrowerInterestRateModel[2]} instead of ${expectBorrowerInterestRateModel.utilisationRatePoint1}`
+    );
+    assert.ok(
+      new BN(borrowerInterestRateModel[3]).eq(expectBorrowerInterestRateModel.utilisationRatePoint2),
+      `Utilisation rate point 2 is ${borrowerInterestRateModel[3]} instead of ${expectBorrowerInterestRateModel.utilisationRatePoint2}`
+    );
+    assert.ok(
+      new BN(borrowerInterestRateModel[4]).eq(expectBorrowerInterestRateModel.interestRateSlope1),
+      `Interest rate slope 1 is ${borrowerInterestRateModel[4]} instead of ${expectBorrowerInterestRateModel.interestRateSlope1}`
+    );
+    assert.ok(
+      new BN(borrowerInterestRateModel[5]).eq(expectBorrowerInterestRateModel.interestRateSlope2),
+      `Interest rate slope 2 is ${borrowerInterestRateModel[5]} instead of ${expectBorrowerInterestRateModel.interestRateSlope2}`
+    );
 
     await expectRevert(
       testUtil.newFarmingPool(
@@ -508,6 +543,54 @@ describe("FarmingPool", () => {
       adapterAddress,
       defaultAdapterAddress,
       `Adapter address is ${adapterAddress} instead of ${defaultAdapterAddress}`
+    );
+  });
+
+  it("should not allow calculate borrower interest rate model for 0 interest rates", async () => {
+    await expectRevert(
+      farmingPool.calculateBorrowerInterestRateModel(BN_ZERO, BN_ONE, BN_ONE, BN_ONE),
+      "0 point 1 interest rate"
+    );
+
+    await expectRevert(
+      farmingPool.calculateBorrowerInterestRateModel(BN_ONE, BN_ZERO, BN_ONE, BN_ONE),
+      "0 point 2 interest rate"
+    );
+  });
+
+  it("should not allow calculate borrower interest rate model for interest rates >= 100%", async () => {
+    await expectRevert(
+      farmingPool.calculateBorrowerInterestRateModel(PERCENT_100, BN_ONE, BN_ONE, BN_ONE),
+      "point 1 interest rate equal or exceed 100%"
+    );
+
+    await expectRevert(
+      farmingPool.calculateBorrowerInterestRateModel(BN_ONE, PERCENT_100, BN_ONE, BN_ONE),
+      "point 2 interest rate equal or exceed 100%"
+    );
+  });
+
+  it("should not allow calculate borrower interest rate model for 0 utilisation rates", async () => {
+    await expectRevert(
+      farmingPool.calculateBorrowerInterestRateModel(BN_ONE, BN_ONE, BN_ZERO, BN_ONE),
+      "0 point 1 utilisation rate"
+    );
+
+    await expectRevert(
+      farmingPool.calculateBorrowerInterestRateModel(BN_ONE, BN_ONE, BN_ONE, BN_ZERO),
+      "0 point 2 utilisation rate"
+    );
+  });
+
+  it("should not allow calculate borrower interest rate model for utilisation rates >= 100%", async () => {
+    await expectRevert(
+      farmingPool.calculateBorrowerInterestRateModel(BN_ONE, BN_ONE, PERCENT_100, BN_ONE),
+      "point 1 utilisation rate equal or exceed 100%"
+    );
+
+    await expectRevert(
+      farmingPool.calculateBorrowerInterestRateModel(BN_ONE, BN_ONE, BN_ONE, PERCENT_100),
+      "point 2 utilisation rate equal or exceed 100%"
     );
   });
 

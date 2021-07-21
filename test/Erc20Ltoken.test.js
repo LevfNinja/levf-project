@@ -1,6 +1,6 @@
 const assert = require("assert");
 const { expectRevert } = require("@openzeppelin/test-helpers");
-const { ether, ZERO_ADDRESS, ...testUtil } = require("./testUtil");
+const { BN, BN_ONE, ether, ZERO_ADDRESS, ...testUtil } = require("./testUtil");
 
 describe("Ltoken", () => {
   let accounts;
@@ -22,12 +22,17 @@ describe("Ltoken", () => {
     const decimals = await ldai.decimals();
     const initialTotalSupply = await ldai.totalSupply();
     const governanceAccount = await ldai.governanceAccount();
+    const isNonFungibleToken = await ldai.isNonFungibleToken();
 
     const expectName = "LDai Token";
     const expectSymbol = "LDai";
     const expectDecimals = 18;
     const expectInitialTotalSupply = ether("0");
     const expectGovernanceAccount = defaultGovernanceAccount;
+    const expectIsNonFungibleToken = false;
+
+    await expectRevert(ldai.setTokenAmount(BN_ONE, ether("1")), "Erc20Ltoken: token is not NFT");
+    await expectRevert(ldai.getTokenAmount(BN_ONE), "Erc20Ltoken: token is not NFT");
 
     assert.strictEqual(name, expectName, `Name is ${name} instead of ${expectName}`);
     assert.strictEqual(symbol, expectSymbol, `Symbol is ${symbol} instead of ${expectSymbol}`);
@@ -40,6 +45,11 @@ describe("Ltoken", () => {
       governanceAccount,
       expectGovernanceAccount,
       `Governance account is ${governanceAccount} instead of token creator ${expectGovernanceAccount}`
+    );
+    assert.strictEqual(
+      isNonFungibleToken,
+      expectIsNonFungibleToken,
+      `isNonFungibleToken is ${isNonFungibleToken} instead of ${expectIsNonFungibleToken}`
     );
   });
 
